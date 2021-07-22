@@ -1,0 +1,239 @@
+module Safe_Logan160246850
+
+-- Student name: Logan Turner
+-- Student number: 160246850
+-- Institution: Newcastle University
+
+imports from IO		 operations  println	renamed println;
+															printf  renamed printf;
+															print		renamed print;
+															
+exports all
+definitions 
+
+--@doc R1 represent the safe cracker generally (e.g. N wheels and M spokes) 
+--@doc R1.1 instantiate the safe cracker to specific configuration 
+--@doc R1.2 instantiate the wheels (4) and spokes (16) 
+
+--@doc R2 find the safe combination/configuration to open the safe
+--@doc R3 ensure that at least one combination exists
+--@doc R4 capture the safe properties in your design
+--@doc R5 ensure that the safe development is satisfiable
+--@doc R5.1 write traces to that effect
+--@doc R5.2 discharge proof obligations
+
+values
+	MAX_WHEELS: nat1 = 4;
+	SECRET_SUM: nat1 = 40;
+	WHEEL_LENGTH: nat1 = 16;
+
+-- The values for the wheels below (i.e. a Safe configuration that has a valid solution/can be cracked)
+-- have been taken from Tyler Rinker's blog, dated 30/5/2015.
+
+-- Rinker, T., 2015. Cracking Safe Cracker with R. [Blog] TRinker's R Blog, 
+-- Available at: <https://trinkerrstuff.wordpress.com/2015/05/30/1646/> [Accessed 13 April 2021].
+
+	SAFE_WITH_SOLUTION: Safe =
+	mk_Safe
+	( 
+		[
+			mk_Wheel([6, <Empty>, 13, <Empty>, 3, <Empty>, 3, <Empty>, 6, <Empty>, 10, <Empty>, 10, <Empty>, 10, <Empty>], 
+								[<Empty>, <Empty>, <Empty>, <Empty>, <Empty>, <Empty>, <Empty>, <Empty>, <Empty>, <Empty>, <Empty>, <Empty>, <Empty>, <Empty>, <Empty>, <Empty>]),
+			mk_Wheel([10, <Empty>, 2, <Empty>, 22, <Empty>, 2, <Empty>, 17, <Empty>, 15, <Empty>, 14, <Empty>, 5, <Empty>], 
+								[1, 6, 10, 6, 10, 2, 6, 10, 4, 1, 5, 5, 4, 8, 6, 3]),
+			mk_Wheel([16, <Empty>, 17, <Empty>, 2, <Empty>, 2, <Empty>, 10, <Empty>, 15, <Empty>, 6, <Empty>, 9, <Empty>],
+								[11, 27, 14, 5, 5, 7, 8, 24, 8, 3, 6, 15, 22, 6, 1, 1]), 
+			mk_Wheel(	[2, 15, 23, 19, 3, 2, 3, 27, 20, 11, 27, 10, 19, 10, 13, 10], 
+								[22, 9, 5, 10, 5, 1, 24, 2, 10, 9, 7, 3, 12, 24, 10, 9])
+		],
+		[0,0,0]
+	);
+	
+	-- [9, 4, 12] is the solution
+	-- the bottom wheel is fixed and therefore does not rotate
+	-- the wheel above should be rotated 12 times, the wheel above that 4 times,
+	-- and finally the innermost wheel should be rotated 9 times.
+	
+types
+	-- have the invariant as close to the number values as possible
+	-- we can then use this restricted MaxValue type as part of our Values
+	MaxValue = nat1
+	inv v == v < SECRET_SUM - (MAX_WHEELS - 1);
+
+	-- a Value is an entry on the wheel. numeric values are defined above in MaxValue,
+	-- or they can be of type 'Empty', an Enum
+	Value = MaxValue | <Empty>;
+	
+	-- a ValueSequence is a sequence of values, representing a circle of numbers on the Safe
+	ValueSequence = seq of Value
+	inv s == len s = WHEEL_LENGTH;
+	
+	-- Rotation is an integer value that acts as a pointer, and demonstrates how much a wheel has rotated 
+	Rotation = nat
+	-- the pointer cannot go past the end of the wheel
+	inv r == r < WHEEL_LENGTH;
+	
+	-- a Combination is a sequence of Rotations. It gives an overview of how much each wheel of the Safe
+	-- has rotated
+	Combination = seq of Rotation
+	-- the number of combinations cannot equal or exceed the maximum wheels in the safe
+	-- cannot equal it as we have a fixed wheel that cannot rotate, cannot exceed it for obvious reasons
+	-- (cannot rotate a wheel that doesn't exist)
+	inv s == len s < MAX_WHEELS;
+	
+	-- a Wheel is composed of two parts, it's inner circle with is a solid sequence of numbers,
+	-- or its outer circle which is usually notched (unless its the outer wheel of the Safe)
+	Wheel :: 
+		outer : ValueSequence
+		inner : ValueSequence;
+	
+	-- a WheelSequence is a sequence of Wheels.
+	WheelSequence = seq of Wheel
+	-- the number of wheels in the sequence must be less than or equal to the maximum wheels
+	inv s == len s <= MAX_WHEELS and
+	(
+		len s = MAX_WHEELS =>
+		(
+			-- the outer ring should not contain any empty values
+			(forall v in set elems s(len s).outer & v <> <Empty>) and
+			-- the innermost circle should be completely empty (it only contains spokes)
+			(forall v in set elems (hd s).inner & v = <Empty>)
+		)
+	);
+	
+	-- a Safe is a combination of a WheelSequence and a Combination (Rotation Sequence)
+	Safe ::
+		wheels : WheelSequence
+		combination : Combination
+	-- for a Safe with 4 wheels, the outer wheel is always fixed and therefore will not have a 
+	-- Combination value, leaving only 3 Combinations. the invariant ensures that this pattern is
+	-- held
+	inv s == len s.wheels = len s.combination + 1;
+	
+	-- a Valid Safe is simply a Safe that is able to be cracked 
+	ValidSafe = Safe
+	-- this invariant checks to see for a given Safe 's' if there is a sequence 
+	-- of rotation values that exist that will crack the safe open
+	inv s == exists_combination([], s);
+
+functions
+	-- the following two functions, exists_combination and crack_safe, are probably not optimal
+	-- as the code is very similar - implying that there is a way to break this down into perhaps 
+	-- another function or an operation
+	
+	-- exists_combination takes in a Rotation sequence and a Safe, and returns a boolean value if 
+	-- there exists a Rotation sequence that will crack open the safe
+	exists_combination: seq of Rotation * Safe -> bool
+  exists_combination(prev, s) ==
+  		-- if a sequence of Rotation values has been provided and they are of the same length, 
+      if len prev = len s.combination 
+      then check_combination(mk_Safe(s.wheels, prev))
+      else
+      	-- good chance that this function is being called by the invariant on ValidSafe, so we need
+      	-- to search for a possible solution
+      	-- this line searches for a Rotation value 'x' that will be used to rotate the wheel and see
+      	-- if it cracks the given Safe 's'. The Rotation value 'x' is concatenated and passed back into 
+      	-- this same function until the length matches and the 'check_combination' method can be called
+      	exists x in set {0,...,WHEEL_LENGTH - 1} & exists_combination(prev ^ [x], s)
+      measure len s.combination - len prev
+  ;
+
+	-- this method runs similarly to exists_combination. 
+	-- it will only take a VALID safe - i.e, a Safe where a solution definitely exists
+  crack_safe: seq of Rotation * ValidSafe -> seq of Rotation
+  crack_safe(prev,s) ==
+      if len prev = len s.combination 
+      then prev
+      else
+      		-- this is a bit similar to the function above
+      		-- i used iota here as it felt the best fit - we want the unique solution here
+      		-- from the VDM manual: 	
+		      		-- The iota operator can only be used if a unique value
+							-- exists which matches the bind and makes the body expression e yield true (i.e. exists1
+							-- bd & e must be true). The semantics of the iota expression is such that it returns the
+							-- unique value which satisfies the body expression (e).
+          crack_safe(prev ^ [(iota x in set {0,...,WHEEL_LENGTH - 1} & exists_combination(prev ^ [x], s))], s)
+      measure len s.combination - len prev
+  ;
+  
+  -- a function that checks every column of a Safe and determines if all of the values 
+  -- in said column add up to SECRET_SUM
+	check_combination: Safe -> bool
+	check_combination(s) ==
+		forall i in set {0,...,WHEEL_LENGTH - 1} & add_column(s, i) = SECRET_SUM
+	;
+	
+	-- a function that adds the numbers in a column together
+	-- it starts off by grabbing the correct value from the outer wheel which is trivial,
+	-- as it is fixed and there are no spokes involved.
+	-- it then calls 'inner_add' which retrieves the remaining numbers in the column
+	add_column: Safe * nat -> nat
+	add_column(s, col_num) ==
+		s.wheels(len s.wheels).outer(col_num + 1) + inner_add(s, col_num)
+	;
+	
+	-- this function 'inner_add' is an auxiliary function to 'add_column'
+	-- it is used to calculate which values to add up on the inner wheels, 
+	-- taking into account the spokes, what they are covering, and how 
+	-- much the wheel has rotated if at all
+	inner_add: Safe * nat -> nat
+	inner_add(s, col_num) ==
+		-- 'pos' represents a pointer-like variable to determine which index to look at
+		let pos = 
+		[
+			((col_num + hd s.combination) mod WHEEL_LENGTH) + 1, -- +1 is used to offset VDM's use of 1 as a starting index
+			if len s.combination > 1 
+			then ((col_num + hd tl s.combination) mod WHEEL_LENGTH) + 1  -- and here
+			else col_num + 1
+		] in
+		if len s.wheels > 2
+		then 
+			(
+				if (hd s.wheels).outer(pos(1)) = <Empty>
+				then (hd tl s.wheels).inner(pos(2))
+				else (hd s.wheels).outer(pos(1))
+			)
+			+
+			-- recursive, building a new mini Safe to continue adding the numbers up
+			inner_add(mk_Safe(tl s.wheels, tl s.combination), col_num) 
+		else
+		(
+			(
+				-- only one wheel remaining in the safe 
+				-- if the head item of this wheel is Empty, read the next value down instead
+				if (hd s.wheels).outer(pos(1)) = <Empty>
+				then (hd tl s.wheels).inner(pos(2))
+				else (hd s.wheels).outer(pos(1))
+			)
+		)
+	-- the only pre condition in this solution, as i feel the type invariants have done the vast majority 
+	-- of the heavy lifting.
+	-- a column number must be within the wheel, and there must be at least 2 wheels to calculate the value 
+	-- (if a slot is <Empty>, go to the next wheel and read that one's value instead)
+	pre col_num < WHEEL_LENGTH and len s.wheels >= 2
+	measure len s.wheels
+	;
+	
+	-- i did not use a State as part of my solution, although i feel it might have been good to include it
+	-- i wrote the State that i would use and left it commented out to show how i would have done it
+	
+	--	state State of
+	--		s: Safe
+	--	init s == s = mk_State(SAFE_WITH_SOLUTION) end
+	
+	-- marked as @TODO, but i found operations were not necessary for this solution
+	--operations
+	--@TODO
+
+	-- i tested this using Run Configurations rather than writing traces
+	-- with more time, i would write traces to help bolster this solution
+	--traces
+	--@TODO
+	
+	end Safe_Logan160246850
+	
+---------------------------------------
+-- Student name: Logan Turner
+-- Student number: 160246850
+-- Institution: Newcastle University
+---------------------------------------	
